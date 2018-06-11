@@ -37,7 +37,7 @@ function EMV(card, crypto) {
 	this.terminalDE[0x9F1A] = new ByteString(TERM_COUNTRY_CODE, HEX);
 	this.terminalDE[0x9F35] = new ByteString(TERMINAL_TYPE, HEX);
 	this.terminalDE[0x9F40] = new ByteString(ADD_TERM_CAPAB, HEX);
-	this.terminalDE[0x9F66] = new ByteString("A7000000", HEX);
+	this.terminalDE[0x9F66] = new ByteString(TERM_TRANS_QUALIFIER, HEX);
 	this.terminalDE[0x9F02] = new ByteString(TRANS_AMOUNT, HEX);
 	this.terminalDE[0x9F03] = new ByteString(AMOUNT_OTHER, HEX);
 	this.terminalDE[0x95] = new ByteString("0000000000", HEX);
