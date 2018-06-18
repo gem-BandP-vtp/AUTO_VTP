@@ -1240,8 +1240,6 @@ EMV.prototype.CryptoValidation = function(generateAC){
 	
 	//Initial Buffer for Cryptogram calculation 
 	
-	print("Input Data Elements to Cryptogram=AMOUNT AUTHORIZED|AMOUNT OTHER|TERMINAL COUNTRY CODE|TVR|TXN CURRENCY CODE|TXN DATE|TXN TYPE|UN|AIP|ATC|CVR");
-	
 	var amountauth = this.CDOL("9F02");
 	var amountoth = this.CDOL("9F03");
 	var termcoun = this.CDOL("9F1A");
@@ -1258,6 +1256,7 @@ EMV.prototype.CryptoValidation = function(generateAC){
 	
 		var ATC1 = generateAC.bytes(3,2);
 		var iad = generateAC.bytes(13,7);
+		var CVN = iad.byteAt(2);
 		var CVR = iad.bytes(3,4);
 			
 	}else if(t.getTag() == EMV.RMTF2){
@@ -1267,9 +1266,11 @@ EMV.prototype.CryptoValidation = function(generateAC){
 		var iad = GAC.get(3).value;
 		
 		new ByteString(iad,HEX);
-			
+		var CVN = iad.byteAt(2);	
 		var CVR = iad.bytes(3,4);		
 	}
+	
+	
 	var DE1 = amountauth.concat(amountoth)
 	var DE2 = DE1.concat(termcoun);
 	var DE3 = DE2.concat(tvr)
@@ -1278,59 +1279,127 @@ EMV.prototype.CryptoValidation = function(generateAC){
 	var DE6 = DE5.concat(txtype);
 	var DE7 = DE6.concat(unprenum);
 	var DE8 = DE7.concat(aip);
-	var DE9 = DE8.concat(ATC1);
-	var DE10 = DE9.concat(CVR);
-	//var DE11 = DE10.toString(HEX).concat("80");
-
+	var DE9 = DE8.concat(ATC1)
+	
+	
+	if (CVN == 10){
+		print("Input Data Elements to Cryptogram=AMOUNT AUTHORIZED|AMOUNT OTHER|TERMINAL COUNTRY CODE|TVR|TXN CURRENCY CODE|TXN DATE|TXN TYPE|UN|AIP|ATC|CVR");
+		var DE10 = DE9.concat(CVR);
+	}else if (CVN == 18){
+		print("Input Data Elements to Cryptogram=AMOUNT AUTHORIZED|AMOUNT OTHER|TERMINAL COUNTRY CODE|TVR|TXN CURRENCY CODE|TXN DATE|TXN TYPE|UN|AIP|ATC|ISSUER APPLICATION DATA");
+		var DE10 = DE9.concat(iad).concat("80");
+	}
+	
 	var Dkac2DES = new Key();
 	Dkac2DES.setComponent(Key.DES,DKac.bytes(0,8));
 	
 	var DE11 = new ByteString(DE10,HEX);
 	
-	//validar que la longitud del buffer es multiplo de 8
-	
-	var DE11long = DE11.length;
-	var modulo = DE11long%8;
-	//print(modulo);
-	var Tag2 = "00";
-	var x = 1;
-	while(x < parseInt(8 - modulo)){
-		Tag2 += "00";
-		x++
-	} 
+	var Tag2 = this.mod8(DE11);
 	
 	var DE12 = new ByteString(DE11 + Tag2,HEX);
 		
 	print("Input Data to Cryptogram = " + DE12.toString(HEX) + "\n"); 
 	
+	if (CVN == 10){
+	
+	
 	var B1 = new ByteString("0000000000000000",HEX);
 	
-	for(var x=0;x<DE12.length;x+=8){
-		var B2 = DE12.bytes(x,8);
-		var B3 = B1.xor(B2);
-	
-		print("B1[" + B1.toString(HEX) + "] " + "XOR " + "B2[" + B2.toString(HEX) + "] " + "=" + "B3[" + B3.toString(HEX) + "]");
-	
-		B1 = crypto.encrypt(Dkac2DES,Crypto.DES_ECB,B3);
+			for(var x=0;x<DE12.length;x+=8){
+				var B2 = DE12.bytes(x,8);
+				var B3 = B1.xor(B2);
+			
+				print("B1[" + B1.toString(HEX) + "] " + "XOR " + "B2[" + B2.toString(HEX) + "] " + "=" + "B3[" + B3.toString(HEX) + "]");
+			
+				B1 = crypto.encrypt(Dkac2DES,Crypto.DES_ECB,B3);
+				
+				if(x<(DE12.length - 8)){
+					print("DES([" + DKac.bytes(0,8).toString(HEX) + "], B3[" + B3.toString(HEX) + "]) = [" + B1.toString(HEX) + "] = Next B1" );
+				}
+			}
+
+		var MAC = crypto.encrypt(DKac2,Crypto.DES_ECB,B3); //Cryptogram value calculated 
+		print("MAC Cryptogram = " + MAC.toString(HEX));
+
+		var ARPCResCod = this.issuerDE[0x1F68].toString(HEX);
+		var t1 = new ByteString(ARPCResCod.concat("000000000000"),HEX);
+		var t2 = new ByteString(MAC,HEX);
 		
-		if(x<(DE12.length - 8)){
-			print("DES([" + DKac.bytes(0,8).toString(HEX) + "], B3[" + B3.toString(HEX) + "]) = [" + B1.toString(HEX) + "] = Next B1" );
-		}
-	}
+		var ARPCResCod2 = t2.xor(t1);
+		var ARPC = crypto.encrypt(Dkac2DES,Crypto.DES_ECB,ARPCResCod2);
 
-	var MAC = crypto.encrypt(DKac2,Crypto.DES_ECB,B3); //Cryptogram value calculated 
-	print("MAC Cryptogram = " + MAC.toString(HEX));
-
-	var ARPCResCod = this.issuerDE[0x1F68].toString(HEX);
-	var t1 = new ByteString(ARPCResCod.concat("000000000000"),HEX);
-	var t2 = new ByteString(MAC,HEX);
+		return [MAC,ARPC,DKac,DKsmi,DKsmc];//datos
 	
-	var ARPCResCod2 = t2.xor(t1);
-	var ARPC = crypto.encrypt(Dkac2DES,Crypto.DES_ECB,ARPCResCod2);
+	} else if (CVN == 18){
+		
+		var B3 = DE12;
+		
+		var SKac2 = new Key();
+		
+		SKac = this.SessionIntegrityAC(DKac)
+		
+		print("SKac = 3DES_ECB(DKac)[Input Data Block A|Input Data Block B] = " + SKac.toString(HEX))
+		
+		SKac2.setComponent(Key.DES,SKac);
+		
+		var MAC = crypto.sign(SKac2, Crypto.DES_MAC_EMV,B3);
+		
+		//var MAC = crypto.encrypt(SKac2,Crypto.DES_ECB,B3); //Cryptogram value calculated 
+		
+		//var MAC16 = MAC.bytes(0,8);
+		print("MAC Cryptogram = " + MAC.toString(HEX));
 
-	return [MAC,ARPC,DKac,DKsmi,DKsmc];//datos
+		var CSU = new ByteString("00800000",HEX)
+		
+		print("CSU=" + CSU.toString(HEX))
+		
+		var ARQC_CSU = MAC.concat(CSU);
+		
+		print("ARQC|CSU = " + ARQC_CSU.toString(HEX))
+		
+		var ARQC_CSU_Padded =  new ByteString(ARQC_CSU + this.mod8(ARQC_CSU),HEX);
+		
+		print("Padded = " + ARQC_CSU_Padded.toString(HEX))
+		
+		var ARPC = crypto.sign(SKac2, Crypto.DES_MAC_EMV,ARQC_CSU_Padded);
+
+		print("ARPC = " + ARPC.toString(HEX))
+		
+		return [MAC,ARPC,DKac,DKsmi,DKsmc];//datos
+		
+	}
+	
+	
 	
 }
+
+EMV.prototype.mod8 = function(DE11){
+
+	var DE11long = DE11.length;
+	var modulo = DE11long%8;
+	
+	var Tag2 = "00";
+	var x = 1;
+	while(x < parseInt(8 - modulo)){
+		Tag2 += "00";
+		x++
+	} 	
+	
+	return Tag2
+}
+
+
+
+
+
+
+
+
+
+
+
+
 
 EMV.prototype.Appblock = function(mac,DKsmi,DKsmc){
 
@@ -1695,6 +1764,29 @@ EMV.prototype.UpdateRecord = function(mac,DKsmi,DKsmc){
 	
 	return newmac;
 }
+
+
+EMV.prototype.SessionIntegrityAC = function(DKsmac){
+
+	var ATC = new ByteString(this.cardDE[0x9F36],HEX);
+	var rest = ATC.neg().add(-1);
+
+	var blockA = ATC.concat(new ByteString("F00000000000",HEX));
+	var blockB = ATC.concat(new ByteString("0F0000000000",HEX));
+	print("Input Data Block A to SKac=" + blockA.toString(HEX));
+	print("Input Data Block B to SKac=" + blockB.toString(HEX));
+
+	var block = blockA.concat(blockB);
+	
+	var sKac2 = new Key();
+	sKac2.setComponent(Key.DES,DKsmac);
+	
+	var sKac = crypto.encrypt(sKac2,Crypto.DES_ECB,block);
+	
+	return sKac
+	
+}
+
 
 EMV.prototype.SessionIntegrity = function(DKsmi,DKsmc){
 	

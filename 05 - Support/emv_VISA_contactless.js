@@ -1259,6 +1259,7 @@ EMV.prototype.CryptoValidation = function(generateAC){
 	var aip = this.cardDE[0x82];
 	var ATC1 = this.cardDE[0x9F36];
 	var iad = this.cardDE[0x9F10];
+	var CVN = iad.byteAt(2);
 	var CVR = iad.bytes(3,4);
 
 	var DE1 = amountauth.concat(amountoth)
@@ -1270,8 +1271,16 @@ EMV.prototype.CryptoValidation = function(generateAC){
 	var DE7 = DE6.concat(unprenum);
 	var DE8 = DE7.concat(aip);
 	var DE9 = DE8.concat(ATC1);
-	var DE10 = DE9.concat(CVR);
-	//var DE11 = DE10.toString(HEX).concat("80");
+	
+	
+	
+	if (CVN == 10){
+		print("Input Data Elements to Cryptogram=AMOUNT AUTHORIZED|AMOUNT OTHER|TERMINAL COUNTRY CODE|TVR|TXN CURRENCY CODE|TXN DATE|TXN TYPE|UN|AIP|ATC|CVR");
+		var DE10 = DE9.concat(CVR);
+	}else if (CVN == 18){
+		print("Input Data Elements to Cryptogram=AMOUNT AUTHORIZED|AMOUNT OTHER|TERMINAL COUNTRY CODE|TVR|TXN CURRENCY CODE|TXN DATE|TXN TYPE|UN|AIP|ATC|ISSUER APPLICATION DATA");
+		var DE10 = DE9.concat(iad).concat("80");
+	}
 
 	var Dkac2DES = new Key();
 	Dkac2DES.setComponent(Key.DES,DKac.bytes(0,8));
@@ -1280,19 +1289,15 @@ EMV.prototype.CryptoValidation = function(generateAC){
 	
 	//validar que la longitud del buffer es multiplo de 8
 	
-	var DE11long = DE11.length;
-	var modulo = DE11long%8;
-	//print(modulo);
-	var Tag2 = "00";
-	var x = 1;
-	while(x < parseInt(8 - modulo)){
-	Tag2 += "00";
-	x++
-	} 
+	var Tag2 = this.mod8(DE11);
 	
 	var DE12 = new ByteString(DE11 + Tag2,HEX);
 		
 	print("Input Data to Cryptogram = " + DE12.toString(HEX) + "\n"); 
+	
+	
+	
+	if (CVN == 10){
 	
 	var B1 = new ByteString("0000000000000000",HEX);
 	
@@ -1320,7 +1325,72 @@ EMV.prototype.CryptoValidation = function(generateAC){
 	var ARPC = crypto.encrypt(Dkac2DES,Crypto.DES_ECB,ARPCResCod2);
 
 	return [MAC,ARPC,DKac,DKsmi,DKsmc];//datos
+
+	} else if (CVN == 18){
+		
+		var B3 = DE12;
+		
+		var SKac2 = new Key();
+		
+		SKac = this.SessionIntegrityAC(DKac)
+		
+		print("SKac = 3DES_ECB(DKac)[Input Data Block A|Input Data Block B] = " + SKac.toString(HEX))
+		
+		SKac2.setComponent(Key.DES,SKac);
+		
+		var MAC = crypto.sign(SKac2, Crypto.DES_MAC_EMV,B3);
+		
+		//var MAC = crypto.encrypt(SKac2,Crypto.DES_ECB,B3); //Cryptogram value calculated 
+		
+		//var MAC16 = MAC.bytes(0,8);
+		print("MAC Cryptogram = " + MAC.toString(HEX));
+
+		var CSU = new ByteString("00800000",HEX)
+		
+		print("CSU=" + CSU.toString(HEX))
+		
+		var ARQC_CSU = MAC.concat(CSU);
+		
+		print("ARQC|CSU = " + ARQC_CSU.toString(HEX))
+		
+		var ARQC_CSU_Padded =  new ByteString(ARQC_CSU + this.mod8(ARQC_CSU),HEX);
+		
+		print("Padded = " + ARQC_CSU_Padded.toString(HEX))
+		
+		var ARPC = crypto.sign(SKac2, Crypto.DES_MAC_EMV,ARQC_CSU_Padded);
+
+		print("ARPC = " + ARPC.toString(HEX))
+		
+		return [MAC,ARPC,DKac,DKsmi,DKsmc];//datos
+				
+		
+	}
+	
+	
+
 }
+
+
+EMV.prototype.mod8 = function(DE11){
+
+	var DE11long = DE11.length;
+	var modulo = DE11long%8;
+	
+	var Tag2 = "00";
+	var x = 1;
+	while(x < parseInt(8 - modulo)){
+		Tag2 += "00";
+		x++
+	} 	
+	
+	return Tag2
+}
+
+
+
+
+
+
 
 EMV.prototype.Appblock = function(mac,DKsmi,DKsmc){
 
@@ -1685,6 +1755,33 @@ EMV.prototype.UpdateRecord = function(mac,DKsmi,DKsmc){
 	
 	return newmac;
 }
+
+
+EMV.prototype.SessionIntegrityAC = function(DKsmac){
+
+	var ATC = new ByteString(this.cardDE[0x9F36],HEX);
+	var rest = ATC.neg().add(-1);
+
+	var blockA = ATC.concat(new ByteString("F00000000000",HEX));
+	var blockB = ATC.concat(new ByteString("0F0000000000",HEX));
+	print("Input Data Block A to SKac=" + blockA.toString(HEX));
+	print("Input Data Block B to SKac=" + blockB.toString(HEX));
+
+	var block = blockA.concat(blockB);
+	
+	var sKac2 = new Key();
+	sKac2.setComponent(Key.DES,DKsmac);
+	
+	var sKac = crypto.encrypt(sKac2,Crypto.DES_ECB,block);
+	
+	return sKac
+	
+}
+
+
+
+
+
 
 EMV.prototype.SessionIntegrity = function(DKsmi,DKsmc){
 	
