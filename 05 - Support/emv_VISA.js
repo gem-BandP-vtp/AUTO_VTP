@@ -84,6 +84,7 @@ EMV.PDOL			= 0x9F38;
 EMV.SDATL			= 0x9F4A;
 EMV.FCI_ISSUER_DISCRETIONARY_DATA = 0xBF0C;
 EMV.DIRECTORY_ENTRY	= 0x61;
+EMV.ARPC			= 0x91;
 
 EMV.AIDLIST = new Array();
 EMV.AIDLIST[0] = { aid : new ByteString(AID1,HEX), partial : true, name : "AMEX" };
@@ -1256,6 +1257,7 @@ EMV.prototype.CryptoValidation = function(generateAC){
 	
 		var ATC1 = generateAC.bytes(3,2);
 		var iad = generateAC.bytes(13,7);
+
 		var CVN = iad.byteAt(2);
 		var CVR = iad.bytes(3,4);
 			
@@ -1264,7 +1266,7 @@ EMV.prototype.CryptoValidation = function(generateAC){
 		var GAC = new ASN1(generateAC);
 		var ATC1 = GAC.get(1).value
 		var iad = GAC.get(3).value;
-		
+
 		new ByteString(iad,HEX);
 		var CVN = iad.byteAt(2);	
 		var CVR = iad.bytes(3,4);		
@@ -1329,6 +1331,9 @@ EMV.prototype.CryptoValidation = function(generateAC){
 		var ARPCResCod2 = t2.xor(t1);
 		var ARPC = crypto.encrypt(Dkac2DES,Crypto.DES_ECB,ARPCResCod2);
 
+		this.cardDE[EMV.ARPC] = ARPC;
+		
+		
 		return [MAC,ARPC,DKac,DKsmi,DKsmc];//datos
 	
 	} else if (CVN == 18){
@@ -1365,6 +1370,10 @@ EMV.prototype.CryptoValidation = function(generateAC){
 		var ARPC = crypto.sign(SKac2, Crypto.DES_MAC_EMV,ARQC_CSU_Padded);
 
 		print("ARPC = " + ARPC.toString(HEX))
+		
+		this.cardDE[EMV.ARPC] = ARPC;
+		
+		
 		
 		return [MAC,ARPC,DKac,DKsmi,DKsmc];//datos
 		
@@ -2013,8 +2022,9 @@ EMV.prototype.CDOL = function(tag1,l1){
 	var l = parseInt(l1,16);
 	switch (tag1) {
 		case "91":
-			var firstGAC = arpc.concat(this.issuerDE[0x1F68]);
-			return firstGAC.toString(HEX);
+			var ARPCCdol = this.cardDE[EMV.ARPC];
+			//print(ARPCCdol)
+			return ARPCCdol.toString(HEX);
 			break;
 		case "8A":
 			var AurespCode = this.issuerDE[0x8A];
